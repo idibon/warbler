@@ -97,6 +97,9 @@ module Warbler
           pathmap = "#{config.relative_gem_path}/bundler/gems/%p"
           pathmap.sub!(%r{^/+}, '')
           config.pathmaps.git = [pathmap]
+
+          sources_to_compile = []
+
           config.bundler[:git_specs].each do |spec|
             full_gem_path = Pathname.new(spec.full_gem_path)
 
@@ -118,9 +121,29 @@ module Warbler
 
             FileList[pattern].each do |src|
               f = Pathname.new(src).relative_path_from(full_gem_path).to_s
-              next if exclude_gems && config.gem_excludes && config.gem_excludes.any? {|rx| f =~ rx }
-              jar.files[apply_pathmaps(config, File.join(full_gem_path.basename, f), :git)] = src
+              next if config.gem_excludes && config.gem_excludes.any? {|rx| f =~ rx }
+              if f =~ /\.rb$/ && config.compile_gems && jar.instance_eval { @compiled }
+                sources_to_compile << [ src, full_gem_path ]
+              else
+                jar.files[apply_pathmaps(config, File.join(full_gem_path.basename, f), :git)] = src
+              end
             end
+          end
+
+          translation_units = sources_to_compile.map do |src, full_gem_path|
+            f = Pathname.new(src).relative_path_from(full_gem_path).to_s
+            inside_jar = apply_pathmaps(config, File.join(full_gem_path.basename, f), :git)
+            new_src = File.join('tmp', inside_jar)
+            FileUtils.mkdir_p(File.dirname(new_src))
+            FileUtils.copy(src, new_src)
+            [ src, new_src, inside_jar ]
+          end
+
+          jar.run_javac(config, translation_units.map { |_, new_src, _| new_src }, 'tmp/WEB-INF/')
+
+          translation_units.each do |src, new_src, inside_jar|
+            jar.files[inside_jar] = StringIO.new("load __FILE__.sub(/\\.rb$/, '.class')")
+            jar.files[inside_jar.gsub(/\.rb$/, '.class')] = new_src.gsub(/\.rb$/, '.class')
           end
         end
       end

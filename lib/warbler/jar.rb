@@ -8,6 +8,7 @@
 require 'warbler/zip_support'
 require 'stringio'
 require 'pathname'
+require 'pp'
 
 module Warbler
   # Class that holds the files that will be stored in the jar file.
@@ -52,20 +53,37 @@ module Warbler
       end
     end
 
-    def run_javac(config, compiled_ruby_files)
+    def run_javac(config, compiled_ruby_files, build_path = nil)
       if config.webxml && config.webxml.context_params.has_key?('jruby.compat.version')
         compat_version = "--#{config.webxml.jruby.compat.version}"
       else
         compat_version = ''
       end
 
-      compiled_ruby_files.each_slice(2500) do |slice|
-        # Need to use the version of JRuby in the application to compile it
-        javac_cmd = %Q{java -classpath #{config.java_libs.join(File::PATH_SEPARATOR)} #{java_version(config)} org.jruby.Main #{compat_version} -S jrubyc \"#{slice.join('" "')}\"}
-        if which('java').nil? && which('env')
-          system %Q{env -i #{javac_cmd}}
+      prefix = ''
+      until prefix.length >= 10 do
+        chunk = compiled_ruby_files.first[prefix.length..-1].split(File::Separator).first + '/'
+        if compiled_ruby_files.all? { |f| f.start_with?(chunk) }
+          prefix += chunk
         else
-          system javac_cmd
+          break
+        end
+      end
+
+      target_workdir = File.join(Dir.pwd,  build_path || '')
+
+      compiled_ruby_files.each_slice(2500) do |slice|
+        relative_files = slice.map { |f| f[(build_path || '').length..-1] }
+        # Need to use the version of JRuby in the application to compile it
+        javac_cmd = %Q{java -classpath #{config.java_libs.join(File::PATH_SEPARATOR)} #{java_version(config)} org.jruby.Main #{compat_version} -S jrubyc \"#{relative_files.join('" "')}\"}
+        if which('java').nil? && which('env')
+          Dir.chdir(target_workdir) do
+            system %Q{env -i #{javac_cmd}}
+          end
+        else
+          Dir.chdir(target_workdir) do
+            system javac_cmd
+          end
         end
         raise "Compile failed" if $?.exitstatus > 0
       end
