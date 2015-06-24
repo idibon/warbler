@@ -72,7 +72,9 @@ module Warbler
 
       target_workdir = File.join(Dir.pwd,  build_path || '')
 
-      compiled_ruby_files.each_slice(2500) do |slice|
+      # NB: was 2500 originally, but this seems to cause path-length limit
+      # problems in some environments, so I dropped to 1000 - GK
+      compiled_ruby_files.each_slice(1000) do |slice|
         relative_files = slice.map { |f| f[(build_path || '').length..-1] }
         # Need to use the version of JRuby in the application to compile it
         javac_cmd = %Q{java -classpath #{config.java_libs.join(File::PATH_SEPARATOR)} #{java_version(config)} org.jruby.Main #{compat_version} -S jrubyc \"#{relative_files.join('" "')}\"}
